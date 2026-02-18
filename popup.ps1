@@ -145,15 +145,46 @@ $body.Text = "Waiting for your input"
 $body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
 $body.FontSize = 14
 
+# Bottom row: hint left, dismiss right
+$bottomRow = New-Object System.Windows.Controls.DockPanel
+$bottomRow.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
+
+$closeBtn = New-Object System.Windows.Controls.TextBlock
+$closeBtn.Text = "Dismiss"
+$closeBtn.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#555555")
+$closeBtn.FontSize = 12
+$closeBtn.Cursor = [System.Windows.Input.Cursors]::Hand
+[System.Windows.Controls.DockPanel]::SetDock($closeBtn, "Right")
+$closeBtn.Add_MouseEnter({ $closeBtn.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea") })
+$closeBtn.Add_MouseLeave({ $closeBtn.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#555555") })
+$closeBtn.Add_MouseLeftButtonDown({
+    param($s, $e)
+    $e.Handled = $true
+    if (Test-Path $pidFile) {
+        $pids = Get-Content $pidFile -ErrorAction SilentlyContinue
+        if ($pids) {
+            foreach ($p in $pids) {
+                if ($p.Trim() -and $p.Trim() -ne "$PID") {
+                    Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
+    $window.Close()
+})
+
 $hint = New-Object System.Windows.Controls.TextBlock
-$hint.Text = "Click to switch"
+$hint.Text = "Focus this tab"
 $hint.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
-$hint.FontSize = 11
-$hint.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
+$hint.FontSize = 12
+
+$null = $bottomRow.Children.Add($closeBtn)
+$null = $bottomRow.Children.Add($hint)
 
 $null = $stack.Children.Add($titleBlock)
 $null = $stack.Children.Add($body)
-$null = $stack.Children.Add($hint)
+$null = $stack.Children.Add($bottomRow)
 $border.Child = $stack
 $window.Content = $border
 
