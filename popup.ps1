@@ -1,5 +1,6 @@
 param(
-    [string]$SessionId = "default"
+    [string]$SessionId = "default",
+    [int]$ScreenIndex = 0
 )
 
 $stateDir = "$env:USERPROFILE\.claude\hooks\claude-notify"
@@ -76,136 +77,130 @@ if (Test-Path $tabIndexFile) {
     if ($idx) { $savedTabIndex = [int]$idx }
 }
 
-# Count active popups to determine stack position
+# Count active popups to determine stack position (count PID files with live processes)
 $activePopups = 0
 Get-ChildItem "$stateDir\.popup-*.pid" -ErrorAction SilentlyContinue | ForEach-Object {
-    $pidVal = Get-Content $_.FullName -ErrorAction SilentlyContinue
-    if ($pidVal) {
-        $proc = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
-        if ($proc -and -not $proc.HasExited) { $activePopups++ }
+    $lines = Get-Content $_.FullName -ErrorAction SilentlyContinue
+    if ($lines) {
+        foreach ($pidLine in $lines) {
+            if ($pidLine.Trim()) {
+                $proc = Get-Process -Id $pidLine.Trim() -ErrorAction SilentlyContinue
+                if ($proc -and -not $proc.HasExited) { $activePopups++ }
+            }
+        }
     }
 }
+# Each session spawns N popups (one per screen), so divide by screen count to get session count
+$screenCount = ([System.Windows.Forms.Screen]::AllScreens).Count
+if ($screenCount -gt 1) { $activePopups = [math]::Floor($activePopups / $screenCount) }
 
 $popupHeight = 100
 
-# Collect all windows so any click handler can close them all
-$allWindows = @()
-
-# Get DPI scaling factor (WPF uses device-independent pixels)
-$dpiScale = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width / [System.Windows.SystemParameters]::PrimaryScreenWidth
-
-# Create a popup on each screen
+# Get target screen
 $screens = [System.Windows.Forms.Screen]::AllScreens
-foreach ($scr in $screens) {
-    # Convert screen bounds from physical pixels to WPF DIPs
-    $scrLeft   = $scr.WorkingArea.Left   / $dpiScale
-    $scrTop    = $scr.WorkingArea.Top    / $dpiScale
-    $scrWidth  = $scr.WorkingArea.Width  / $dpiScale
-    $scrHeight = $scr.WorkingArea.Height / $dpiScale
-    $scrRight  = $scrLeft + $scrWidth
-    $scrBottom = $scrTop + $scrHeight
+if ($ScreenIndex -ge $screens.Count) { $ScreenIndex = 0 }
+$targetScreen = $screens[$ScreenIndex]
+$wa = $targetScreen.WorkingArea
 
-    $window = New-Object System.Windows.Window
-    $window.WindowStyle = "None"
-    $window.AllowsTransparency = $true
-    $window.Background = [System.Windows.Media.Brushes]::Transparent
-    $window.Topmost = $true
-    $window.ShowInTaskbar = $false
-    $window.SizeToContent = "WidthAndHeight"
-    $window.WindowStartupLocation = "Manual"
+# Build the popup window
+$window = New-Object System.Windows.Window
+$window.WindowStyle = "None"
+$window.AllowsTransparency = $true
+$window.Background = [System.Windows.Media.Brushes]::Transparent
+$window.Topmost = $true
+$window.ShowInTaskbar = $false
+$window.SizeToContent = "WidthAndHeight"
+$window.WindowStartupLocation = "Manual"
 
-    $window.Left = $scrRight - 370
-    $baseTop = $scrBottom - 110
-    $window.Top = $baseTop - ($activePopups * $popupHeight)
+$window.Left = $wa.Right - 370
+$baseTop = $wa.Bottom - 110
+$window.Top = $baseTop - ($activePopups * $popupHeight)
 
-    $border = New-Object System.Windows.Controls.Border
-    $border.CornerRadius = [System.Windows.CornerRadius]::new(8)
-    $border.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#1a1a2e")
-    $border.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
-    $border.BorderThickness = [System.Windows.Thickness]::new(2)
-    $border.Padding = [System.Windows.Thickness]::new(20, 16, 20, 16)
-    $border.Cursor = [System.Windows.Input.Cursors]::Hand
+$border = New-Object System.Windows.Controls.Border
+$border.CornerRadius = [System.Windows.CornerRadius]::new(8)
+$border.Background = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#1a1a2e")
+$border.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
+$border.BorderThickness = [System.Windows.Thickness]::new(2)
+$border.Padding = [System.Windows.Thickness]::new(20, 16, 20, 16)
+$border.Cursor = [System.Windows.Input.Cursors]::Hand
 
-    $stack = New-Object System.Windows.Controls.StackPanel
+$stack = New-Object System.Windows.Controls.StackPanel
 
-    $titleBlock = New-Object System.Windows.Controls.TextBlock
-    $titleBlock.Text = "Claude Code"
-    $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
-    $titleBlock.FontSize = 16
-    $titleBlock.FontWeight = "Bold"
-    $titleBlock.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
+$titleBlock = New-Object System.Windows.Controls.TextBlock
+$titleBlock.Text = "Claude Code"
+$titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
+$titleBlock.FontSize = 16
+$titleBlock.FontWeight = "Bold"
+$titleBlock.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
 
-    $body = New-Object System.Windows.Controls.TextBlock
-    $body.Text = "Waiting for your input"
-    $body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
-    $body.FontSize = 14
+$body = New-Object System.Windows.Controls.TextBlock
+$body.Text = "Waiting for your input"
+$body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
+$body.FontSize = 14
 
-    $hint = New-Object System.Windows.Controls.TextBlock
-    $hint.Text = "Click to switch"
-    $hint.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
-    $hint.FontSize = 11
-    $hint.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
+$hint = New-Object System.Windows.Controls.TextBlock
+$hint.Text = "Click to switch"
+$hint.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#888888")
+$hint.FontSize = 11
+$hint.Margin = [System.Windows.Thickness]::new(0, 4, 0, 0)
 
-    $null = $stack.Children.Add($titleBlock)
-    $null = $stack.Children.Add($body)
-    $null = $stack.Children.Add($hint)
-    $border.Child = $stack
-    $window.Content = $border
+$null = $stack.Children.Add($titleBlock)
+$null = $stack.Children.Add($body)
+$null = $stack.Children.Add($hint)
+$border.Child = $stack
+$window.Content = $border
 
-    # Click: bring WT window to front, switch tab, dismiss all popups
-    $window.Add_MouseLeftButtonDown({
-        if ($savedHwnd -ne [IntPtr]::Zero -and [WinSwitch]::IsWindow($savedHwnd)) {
-            [WinSwitch]::BringToFront($savedHwnd)
-            foreach ($w in $allWindows) { $w.Close() }
-            if ($savedTabIndex -gt 0 -and $savedTabIndex -le 9) {
-                Start-Sleep -Milliseconds 200
-                [System.Windows.Forms.SendKeys]::SendWait("^(%$savedTabIndex)")
+# Click: kill sibling popups, bring WT window to front, switch tab, dismiss
+$window.Add_MouseLeftButtonDown({
+    # Kill all sibling popups for this session
+    if (Test-Path $pidFile) {
+        $pids = Get-Content $pidFile -ErrorAction SilentlyContinue
+        if ($pids) {
+            foreach ($p in $pids) {
+                if ($p.Trim() -and $p.Trim() -ne "$PID") {
+                    Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
+                }
             }
-        } else {
-            foreach ($w in $allWindows) { $w.Close() }
         }
-    })
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+    }
 
-    # Slide-in animation
-    $animTarget = $baseTop - ($activePopups * $popupHeight)
-    $animFrom = $scrBottom
-    $window.Add_Loaded({
-        $animation = New-Object System.Windows.Media.Animation.DoubleAnimation
-        $animation.From = $animFrom
-        $animation.To = $animTarget
-        $animation.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(300))
-        $animation.EasingFunction = New-Object System.Windows.Media.Animation.QuadraticEase
-        $window.BeginAnimation([System.Windows.Window]::TopProperty, $animation)
-    })
-
-    # When this window closes, check if all windows are closed -> shut down dispatcher
-    $window.Add_Closed({
-        $anyOpen = $false
-        foreach ($w in $allWindows) {
-            if ($w.IsVisible) { $anyOpen = $true; break }
+    if ($savedHwnd -ne [IntPtr]::Zero -and [WinSwitch]::IsWindow($savedHwnd)) {
+        [WinSwitch]::BringToFront($savedHwnd)
+        $window.Close()
+        if ($savedTabIndex -gt 0 -and $savedTabIndex -le 9) {
+            Start-Sleep -Milliseconds 200
+            [System.Windows.Forms.SendKeys]::SendWait("^(%$savedTabIndex)")
         }
-        if (-not $anyOpen) {
-            [System.Windows.Threading.Dispatcher]::CurrentDispatcher.InvokeShutdown()
-        }
-    })
+    } else {
+        $window.Close()
+    }
+})
 
-    $allWindows += $window
-}
-
-# Auto-close all after 30 seconds
+# Auto-close after 30 seconds
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(30)
-$timer.Add_Tick({ foreach ($w in $allWindows) { $w.Close() } })
+$timer.Add_Tick({ $window.Close() })
 $timer.Start()
 
-# Write PID so resume can kill us (and other popups can count us)
-$pidFile = "$stateDir\.popup-$SessionId.pid"
-Set-Content -Path $pidFile -Value $PID -NoNewline
+# Slide-in animation
+$animTarget = $baseTop - ($activePopups * $popupHeight)
+$animFrom = $wa.Bottom
+$window.Add_Loaded({
+    $animation = New-Object System.Windows.Media.Animation.DoubleAnimation
+    $animation.From = $animFrom
+    $animation.To = $animTarget
+    $animation.Duration = [System.Windows.Duration]::new([TimeSpan]::FromMilliseconds(300))
+    $animation.EasingFunction = New-Object System.Windows.Media.Animation.QuadraticEase
+    $window.BeginAnimation([System.Windows.Window]::TopProperty, $animation)
+})
 
-# Show all windows (non-blocking), then run the dispatcher
+# Append PID to session pid file (multiple popups per session now)
+$pidFile = "$stateDir\.popup-$SessionId.pid"
+Add-Content -Path $pidFile -Value $PID
+
 try {
-    foreach ($w in $allWindows) { $w.Show() }
-    [System.Windows.Threading.Dispatcher]::Run()
+    $null = $window.ShowDialog()
 } catch {
     $_ | Out-File "$stateDir\popup-crash.log"
 }

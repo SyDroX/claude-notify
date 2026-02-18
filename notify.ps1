@@ -71,10 +71,14 @@ try {
                 }
             }
 
-            # Kill this session's popup
+            # Kill this session's popups (one per screen)
             if (Test-Path $pidFile) {
-                $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-                if ($oldPid) { Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue }
+                $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
+                if ($oldPids) {
+                    foreach ($p in $oldPids) {
+                        if ($p.Trim()) { Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue }
+                    }
+                }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
             }
         }
@@ -89,15 +93,23 @@ try {
 
             [WinHelper]::Flash($hwnd)
 
-            # Kill any existing popup for this session
+            # Kill any existing popups for this session
             if (Test-Path $pidFile) {
-                $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-                if ($oldPid) { Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue }
+                $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
+                if ($oldPids) {
+                    foreach ($p in $oldPids) {
+                        if ($p.Trim()) { Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue }
+                    }
+                }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
             }
 
-            # Launch popup with session-specific state files
-            Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$popupScript`" -SessionId $sessionId" -WindowStyle Hidden
+            # Launch one popup per screen
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+            $screens = [System.Windows.Forms.Screen]::AllScreens
+            for ($i = 0; $i -lt $screens.Count; $i++) {
+                Start-Process powershell.exe -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$popupScript`" -SessionId $sessionId -ScreenIndex $i" -WindowStyle Hidden
+            }
         }
     }
 } catch {}
