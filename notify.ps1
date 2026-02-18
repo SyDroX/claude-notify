@@ -93,6 +93,45 @@ try {
 
             [WinHelper]::Flash($hwnd)
 
+            # Read the actual tab name from WT via UI Automation
+            try {
+                Add-Type -AssemblyName UIAutomationClient -ErrorAction SilentlyContinue
+                Add-Type -AssemblyName UIAutomationTypes -ErrorAction SilentlyContinue
+                $tabIdx = $null
+                if (Test-Path $tabIndexFile) {
+                    $tabIdx = [int](Get-Content $tabIndexFile -Raw -ErrorAction SilentlyContinue)
+                }
+                if ($tabIdx -and [WinHelper]::IsWindow($hwnd)) {
+                    $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
+                    $tabs = $root.FindAll(
+                        [System.Windows.Automation.TreeScope]::Descendants,
+                        [System.Windows.Automation.PropertyCondition]::new(
+                            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+                            [System.Windows.Automation.ControlType]::TabItem
+                        )
+                    )
+                    if ($tabIdx -ge 1 -and $tabIdx -le $tabs.Count) {
+                        $rawName = $tabs[$tabIdx - 1].Current.Name
+                        $tabName = ($rawName -replace '[^\x20-\x7E]', '').Trim()
+                        if ($tabName) {
+                            $labelFile = "$stateDir\.label-$sessionId"
+                            $existingLabel = ""
+                            if (Test-Path $labelFile) {
+                                $existingLabel = (Get-Content $labelFile -Raw -ErrorAction SilentlyContinue).Trim()
+                            }
+                            # Keep window prefix (e.g. "Repos") if present
+                            if ($existingLabel -match '^(.+?) / ') {
+                                $prefix = $Matches[1]
+                                $newLabel = "$prefix / $tabName"
+                            } else {
+                                $newLabel = $tabName
+                            }
+                            Set-Content $labelFile $newLabel
+                        }
+                    }
+                }
+            } catch {}
+
             # Kill any existing popups for this session
             if (Test-Path $pidFile) {
                 $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
