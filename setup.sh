@@ -3,10 +3,12 @@
 # It captures the current WT window and selected tab for this session.
 #
 # Usage:
-#   bash ~/.claude/hooks/claude-notify/setup.sh          # auto-detect tab index
-#   bash ~/.claude/hooks/claude-notify/setup.sh 3        # override tab index to 3
+#   bash ~/.claude/hooks/claude-notify/setup.sh                        # auto-detect
+#   bash ~/.claude/hooks/claude-notify/setup.sh 3                      # override tab index
+#   bash ~/.claude/hooks/claude-notify/setup.sh 3 "Repos / Claude 1"  # override tab index + label
 
 TAB_OVERRIDE="$1"
+LABEL="$2"
 
 if [ -z "$WT_SESSION" ]; then
     echo "ERROR: WT_SESSION not set. Run this from Windows Terminal."
@@ -39,9 +41,15 @@ else
     exit 1
 fi
 
+# Save label if provided
+if [ -n "$LABEL" ]; then
+    printf '%s' "$LABEL" > "$DIR/.label-$WT_SESSION"
+fi
+
 echo "Configured for session $WT_SESSION"
 echo "  Window: $HWND"
 echo "  Tab index: $TAB"
+[ -n "$LABEL" ] && echo "  Label: $LABEL"
 echo ""
 echo "Notifications will target this window and tab."
 echo "Re-run this command if you rearrange tabs or restart WT."

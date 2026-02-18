@@ -2,6 +2,7 @@
 .hwnd-*
 .tabindex-*
 .tabname-*
+.label-*
 .popup-*.pid
 .cooldown-*
 .savehwnd-debug

@@ -77,6 +77,13 @@ if (Test-Path $tabIndexFile) {
     if ($idx) { $savedTabIndex = [int]$idx }
 }
 
+$labelFile = "$stateDir\.label-$SessionId"
+$label = ""
+if (Test-Path $labelFile) {
+    $label = (Get-Content $labelFile -Raw -ErrorAction SilentlyContinue)
+    if ($label) { $label = $label.Trim() }
+}
+
 # Count active popups to determine stack position (count PID files with live processes)
 $activePopups = 0
 Get-ChildItem "$stateDir\.popup-*.pid" -ErrorAction SilentlyContinue | ForEach-Object {
@@ -127,7 +134,7 @@ $border.Cursor = [System.Windows.Input.Cursors]::Hand
 $stack = New-Object System.Windows.Controls.StackPanel
 
 $titleBlock = New-Object System.Windows.Controls.TextBlock
-$titleBlock.Text = "Claude Code"
+$titleBlock.Text = if ($label) { "Claude Code - $label" } else { "Claude Code" }
 $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
 $titleBlock.FontSize = 16
 $titleBlock.FontWeight = "Bold"
