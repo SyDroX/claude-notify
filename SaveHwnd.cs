@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Management;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Automation;
 
@@ -12,6 +16,84 @@ class SaveHwnd
     [DllImport("user32.dll")]
     static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
+    [DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    static extern int GetWindowTextLength(IntPtr hWnd);
+
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    static int GetParentPid(int pid)
+    {
+        try
+        {
+            using (var searcher = new ManagementObjectSearcher(
+                "SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = " + pid))
+            {
+                foreach (ManagementObject item in searcher.Get())
+                {
+                    return Convert.ToInt32(item["ParentProcessId"]);
+                }
+            }
+        }
+        catch { }
+        return -1;
+    }
+
+    static IntPtr FindWindowByProcessId(int targetPid)
+    {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+        {
+            if (!IsWindowVisible(hWnd)) return true;
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if ((int)pid == targetPid)
+            {
+                int titleLen = GetWindowTextLength(hWnd);
+                if (titleLen > 0)
+                {
+                    result = hWnd;
+                    return false;
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
+    static IntPtr FindWtWindowByProcessTree()
+    {
+        int pid = Process.GetCurrentProcess().Id;
+
+        // Walk up parent processes looking for WindowsTerminal
+        for (int i = 0; i < 20; i++)
+        {
+            pid = GetParentPid(pid);
+            if (pid <= 0) break;
+
+            try
+            {
+                var proc = Process.GetProcessById(pid);
+                if (proc.ProcessName == "WindowsTerminal")
+                {
+                    // Find the visible window owned by this WT process
+                    IntPtr hwnd = FindWindowByProcessId(pid);
+                    if (hwnd != IntPtr.Zero) return hwnd;
+                }
+            }
+            catch { }
+        }
+        return IntPtr.Zero;
+    }
+
     static void Main()
     {
         string dir = Path.Combine(
@@ -19,18 +101,25 @@ class SaveHwnd
             ".claude", "hooks", "claude-notify"
         );
 
-        IntPtr hwnd = GetForegroundWindow();
-        if (hwnd == IntPtr.Zero) return;
+        // Try process tree first (reliable for automated launches like DevLayout)
+        IntPtr hwnd = FindWtWindowByProcessTree();
 
-        // Verify it's a WindowsTerminal window
-        uint pid;
-        GetWindowThreadProcessId(hwnd, out pid);
-        try
+        // Fall back to foreground window (works for manual setup in focused tab)
+        if (hwnd == IntPtr.Zero)
         {
-            var proc = System.Diagnostics.Process.GetProcessById((int)pid);
-            if (proc.ProcessName != "WindowsTerminal") return;
+            hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero) return;
+
+            // Verify it's a WindowsTerminal window
+            uint pid;
+            GetWindowThreadProcessId(hwnd, out pid);
+            try
+            {
+                var proc = Process.GetProcessById((int)pid);
+                if (proc.ProcessName != "WindowsTerminal") return;
+            }
+            catch { return; }
         }
-        catch { return; }
 
         // Save HWND
         File.WriteAllText(Path.Combine(dir, ".hwnd"), hwnd.ToInt64().ToString());

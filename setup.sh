@@ -9,6 +9,7 @@
 
 TAB_OVERRIDE="$1"
 LABEL="$2"
+HWND_OVERRIDE="$3"
 
 if [ -z "$WT_SESSION" ]; then
     echo "ERROR: WT_SESSION not set. Run this from Windows Terminal."
@@ -17,16 +18,22 @@ fi
 
 DIR="$USERPROFILE/.claude/hooks/claude-notify"
 
-# Capture current foreground window + selected tab index
-"$DIR/save-hwnd.exe"
-
-# Save window handle
-if [ -f "$DIR/.hwnd" ]; then
-    cp "$DIR/.hwnd" "$DIR/.hwnd-$WT_SESSION"
-    HWND=$(cat "$DIR/.hwnd")
+if [ -n "$HWND_OVERRIDE" ]; then
+    # Use provided HWND (from DevLayout or other automated launcher)
+    printf '%s' "$HWND_OVERRIDE" > "$DIR/.hwnd-$WT_SESSION"
+    HWND="$HWND_OVERRIDE"
 else
-    echo "ERROR: Failed to capture window handle."
-    exit 1
+    # Capture current foreground window + selected tab index
+    "$DIR/save-hwnd.exe"
+
+    # Save window handle
+    if [ -f "$DIR/.hwnd" ]; then
+        cp "$DIR/.hwnd" "$DIR/.hwnd-$WT_SESSION"
+        HWND=$(cat "$DIR/.hwnd")
+    else
+        echo "ERROR: Failed to capture window handle."
+        exit 1
+    fi
 fi
 
 # Save tab index (use override if provided, otherwise use detected value)

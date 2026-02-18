@@ -12,7 +12,7 @@ if not exist "%CSC%" (
 )
 
 echo Compiling save-hwnd.exe...
-"%CSC%" -nologo -optimize+ -out:save-hwnd.exe SaveHwnd.cs -r:"%WPF%\UIAutomationClient.dll" -r:"%WPF%\UIAutomationTypes.dll"
+"%CSC%" -nologo -optimize+ -out:save-hwnd.exe SaveHwnd.cs -r:"%WPF%\UIAutomationClient.dll" -r:"%WPF%\UIAutomationTypes.dll" -r:System.Management.dll
 
 if %ERRORLEVEL% EQU 0 (
     echo Build successful: save-hwnd.exe
