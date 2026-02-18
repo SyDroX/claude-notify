@@ -2,7 +2,11 @@
 # Run this from within a Claude Code terminal to configure notifications.
 # It captures the current WT window and selected tab for this session.
 #
-# Usage: bash ~/.claude/hooks/claude-notify/setup.sh
+# Usage:
+#   bash ~/.claude/hooks/claude-notify/setup.sh          # auto-detect tab index
+#   bash ~/.claude/hooks/claude-notify/setup.sh 3        # override tab index to 3
+
+TAB_OVERRIDE="$1"
 
 if [ -z "$WT_SESSION" ]; then
     echo "ERROR: WT_SESSION not set. Run this from Windows Terminal."
@@ -14,7 +18,7 @@ DIR="$USERPROFILE/.claude/hooks/claude-notify"
 # Capture current foreground window + selected tab index
 "$DIR/save-hwnd.exe"
 
-# Move generic files to session-specific names
+# Save window handle
 if [ -f "$DIR/.hwnd" ]; then
     cp "$DIR/.hwnd" "$DIR/.hwnd-$WT_SESSION"
     HWND=$(cat "$DIR/.hwnd")
@@ -23,7 +27,11 @@ else
     exit 1
 fi
 
-if [ -f "$DIR/.tabindex" ]; then
+# Save tab index (use override if provided, otherwise use detected value)
+if [ -n "$TAB_OVERRIDE" ]; then
+    printf '%s' "$TAB_OVERRIDE" > "$DIR/.tabindex-$WT_SESSION"
+    TAB="$TAB_OVERRIDE"
+elif [ -f "$DIR/.tabindex" ]; then
     cp "$DIR/.tabindex" "$DIR/.tabindex-$WT_SESSION"
     TAB=$(cat "$DIR/.tabindex")
 else
