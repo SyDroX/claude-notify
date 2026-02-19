@@ -102,6 +102,7 @@ $screenCount = ([System.Windows.Forms.Screen]::AllScreens).Count
 if ($screenCount -gt 1) { $activePopups = [math]::Floor($activePopups / $screenCount) }
 
 $popupHeight = 100
+$pidFile = "$stateDir\.popup-$SessionId.pid"
 
 # Get target screen
 $screens = [System.Windows.Forms.Screen]::AllScreens
@@ -119,9 +120,12 @@ $window.ShowInTaskbar = $false
 $window.SizeToContent = "WidthAndHeight"
 $window.WindowStartupLocation = "Manual"
 
-$window.Left = $wa.Right - 370
-$baseTop = $wa.Bottom - 110
-$window.Top = $baseTop - ($activePopups * $popupHeight)
+# Position: bottom-right of screen, clamped within working area
+$popupWidth = 350
+$margin = 20
+$window.Left = [Math]::Max($wa.Right - $popupWidth - $margin, $wa.Left)
+$baseTop = [Math]::Max($wa.Bottom - $popupHeight - 10, $wa.Top)
+$window.Top = [Math]::Max($baseTop - ($activePopups * $popupHeight), $wa.Top)
 
 $border = New-Object System.Windows.Controls.Border
 $border.CornerRadius = [System.Windows.CornerRadius]::new(8)
@@ -134,7 +138,7 @@ $border.Cursor = [System.Windows.Input.Cursors]::Hand
 $stack = New-Object System.Windows.Controls.StackPanel
 
 $titleBlock = New-Object System.Windows.Controls.TextBlock
-$titleBlock.Text = if ($label) { "Claude Code - $label" } else { "Claude Code" }
+$titleBlock.Text = if ($label) { "Claude - $label" } else { "Claude" }
 $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
 $titleBlock.FontSize = 16
 $titleBlock.FontWeight = "Bold"
@@ -234,7 +238,6 @@ $window.Add_Loaded({
 })
 
 # Append PID to session pid file (multiple popups per session now)
-$pidFile = "$stateDir\.popup-$SessionId.pid"
 Add-Content -Path $pidFile -Value $PID
 
 try {
