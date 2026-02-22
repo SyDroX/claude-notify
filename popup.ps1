@@ -84,7 +84,7 @@ if (Test-Path $labelFile) {
     if ($label) { $label = $label.Trim() }
 }
 
-# Count active popups to determine stack position (count PID files with live processes)
+# Count active popups to determine stack position
 $activePopups = 0
 Get-ChildItem "$stateDir\.popup-*.pid" -ErrorAction SilentlyContinue | ForEach-Object {
     $lines = Get-Content $_.FullName -ErrorAction SilentlyContinue
@@ -97,12 +97,12 @@ Get-ChildItem "$stateDir\.popup-*.pid" -ErrorAction SilentlyContinue | ForEach-O
         }
     }
 }
-# Each session spawns N popups (one per screen), so divide by screen count to get session count
 $screenCount = ([System.Windows.Forms.Screen]::AllScreens).Count
 if ($screenCount -gt 1) { $activePopups = [math]::Floor($activePopups / $screenCount) }
 
 $popupHeight = 100
 $pidFile = "$stateDir\.popup-$SessionId.pid"
+$dismissFile = "$stateDir\.dismiss-$SessionId"
 
 # Get target screen
 $screens = [System.Windows.Forms.Screen]::AllScreens
@@ -117,7 +117,8 @@ $window.AllowsTransparency = $true
 $window.Background = [System.Windows.Media.Brushes]::Transparent
 $window.Topmost = $true
 $window.ShowInTaskbar = $false
-$window.SizeToContent = "WidthAndHeight"
+$window.SizeToContent = "Height"
+$window.Width = 350
 $window.WindowStartupLocation = "Manual"
 
 # Position: bottom-right of screen, clamped within working area
@@ -142,12 +143,14 @@ $titleBlock.Text = if ($label) { "Claude - $label" } else { "Claude" }
 $titleBlock.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#f0883e")
 $titleBlock.FontSize = 16
 $titleBlock.FontWeight = "Bold"
+$titleBlock.TextTrimming = "CharacterEllipsis"
 $titleBlock.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
 
 $body = New-Object System.Windows.Controls.TextBlock
 $body.Text = "Waiting for your input"
 $body.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFrom("#eaeaea")
 $body.FontSize = 14
+$body.TextWrapping = "Wrap"
 
 # Bottom row: hint left, dismiss right
 $bottomRow = New-Object System.Windows.Controls.DockPanel
@@ -164,17 +167,9 @@ $closeBtn.Add_MouseLeave({ $closeBtn.Foreground = [System.Windows.Media.BrushCon
 $closeBtn.Add_MouseLeftButtonDown({
     param($s, $e)
     $e.Handled = $true
-    if (Test-Path $pidFile) {
-        $pids = Get-Content $pidFile -ErrorAction SilentlyContinue
-        if ($pids) {
-            foreach ($p in $pids) {
-                if ($p.Trim() -and $p.Trim() -ne "$PID") {
-                    Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
-                }
-            }
-        }
-        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-    }
+    Write-PopupLog "DISMISS clicked"
+    # Signal all siblings to close
+    Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
     $window.Close()
 })
 
@@ -192,20 +187,12 @@ $null = $stack.Children.Add($bottomRow)
 $border.Child = $stack
 $window.Content = $border
 
-# Click: kill sibling popups, bring WT window to front, switch tab, dismiss
+# Click: signal siblings, bring WT window to front, switch tab, dismiss
 $window.Add_MouseLeftButtonDown({
-    # Kill all sibling popups for this session
-    if (Test-Path $pidFile) {
-        $pids = Get-Content $pidFile -ErrorAction SilentlyContinue
-        if ($pids) {
-            foreach ($p in $pids) {
-                if ($p.Trim() -and $p.Trim() -ne "$PID") {
-                    Stop-Process -Id $p.Trim() -Force -ErrorAction SilentlyContinue
-                }
-            }
-        }
-        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-    }
+    Write-PopupLog "CLICKED"
+    # Signal all siblings to close via dismiss file
+    Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
+    Write-PopupLog "DISMISS_SIGNAL written"
 
     if ($savedHwnd -ne [IntPtr]::Zero -and [WinSwitch]::IsWindow($savedHwnd)) {
         [WinSwitch]::BringToFront($savedHwnd)
@@ -215,15 +202,27 @@ $window.Add_MouseLeftButtonDown({
             [System.Windows.Forms.SendKeys]::SendWait("^(%$savedTabIndex)")
         }
     } else {
+        Write-PopupLog "NO_HWND or invalid"
         $window.Close()
     }
 })
 
 # Auto-close after 30 seconds
-$timer = New-Object System.Windows.Threading.DispatcherTimer
-$timer.Interval = [TimeSpan]::FromSeconds(30)
-$timer.Add_Tick({ $window.Close() })
-$timer.Start()
+$autoCloseTimer = New-Object System.Windows.Threading.DispatcherTimer
+$autoCloseTimer.Interval = [TimeSpan]::FromSeconds(30)
+$autoCloseTimer.Add_Tick({ Write-PopupLog "TIMEOUT auto-close"; $window.Close() })
+$autoCloseTimer.Start()
+
+# Poll for dismiss signal from sibling popups (every 500ms)
+$dismissTimer = New-Object System.Windows.Threading.DispatcherTimer
+$dismissTimer.Interval = [TimeSpan]::FromMilliseconds(500)
+$dismissTimer.Add_Tick({
+    if (Test-Path $dismissFile) {
+        Write-PopupLog "DISMISS_SIGNAL detected, closing"
+        $window.Close()
+    }
+})
+$dismissTimer.Start()
 
 # Slide-in animation
 $animTarget = $baseTop - ($activePopups * $popupHeight)
@@ -237,11 +236,25 @@ $window.Add_Loaded({
     $window.BeginAnimation([System.Windows.Window]::TopProperty, $animation)
 })
 
-# Append PID to session pid file (multiple popups per session now)
+# Append PID to session pid file
 Add-Content -Path $pidFile -Value $PID
+
+$logFile = "$stateDir\popup-debug.log"
+
+function Write-PopupLog {
+    param([string]$Msg)
+    $ts = Get-Date -Format "HH:mm:ss.fff"
+    Add-Content -Path $logFile -Value "[$ts] PID=$PID Screen=$ScreenIndex Session=$SessionId $Msg"
+}
+
+# Clean dismiss file from previous run if stale
+Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
+
+Write-PopupLog "STARTED"
 
 try {
     $null = $window.ShowDialog()
 } catch {
     $_ | Out-File "$stateDir\popup-crash.log"
 }
+Write-PopupLog "EXITED"

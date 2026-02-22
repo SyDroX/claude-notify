@@ -8,6 +8,7 @@ $sessionId = $env:WT_SESSION
 if (-not $sessionId) { $sessionId = "default" }
 $stateDir = "$env:USERPROFILE\.claude\hooks\claude-notify"
 $pidFile = "$stateDir\.popup-$sessionId.pid"
+$dismissFile = "$stateDir\.dismiss-$sessionId"
 $cooldownFile = "$stateDir\.cooldown-$sessionId"
 $hwndFile = "$stateDir\.hwnd-$sessionId"
 $tabIndexFile = "$stateDir\.tabindex-$sessionId"
@@ -71,7 +72,8 @@ try {
                 }
             }
 
-            # Kill this session's popups (one per screen)
+            # Dismiss this session's popups via signal file + process kill
+            Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
             if (Test-Path $pidFile) {
                 $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
                 if ($oldPids) {
@@ -81,6 +83,7 @@ try {
                 }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
             }
+            Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
         }
         "attention" {
             # Read saved HWND for this session
@@ -133,6 +136,7 @@ try {
             } catch {}
 
             # Kill any existing popups for this session
+            Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
             if (Test-Path $pidFile) {
                 $oldPids = Get-Content $pidFile -ErrorAction SilentlyContinue
                 if ($oldPids) {
@@ -142,6 +146,7 @@ try {
                 }
                 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
             }
+            Remove-Item $dismissFile -Force -ErrorAction SilentlyContinue
 
             # Launch one popup per screen
             Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
@@ -152,3 +157,4 @@ try {
         }
     }
 } catch {}
+exit 0
