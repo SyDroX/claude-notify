@@ -42,6 +42,28 @@ public class WinSwitch {
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_SHOWWINDOW = 0x0040;
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FLASHWINFO {
+        public uint cbSize;
+        public IntPtr hwnd;
+        public uint dwFlags;
+        public uint uCount;
+        public uint dwTimeout;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+
+    public static void StopFlash(IntPtr hwnd) {
+        FLASHWINFO info = new FLASHWINFO();
+        info.cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf(info);
+        info.hwnd = hwnd;
+        info.dwFlags = 0; // FLASHW_STOP
+        info.uCount = 0;
+        info.dwTimeout = 0;
+        FlashWindowEx(ref info);
+    }
+
     public static void BringToFront(IntPtr hwnd) {
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
         SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
@@ -168,6 +190,9 @@ $closeBtn.Add_MouseLeftButtonDown({
     param($s, $e)
     $e.Handled = $true
     Write-PopupLog "DISMISS clicked"
+    if ($savedHwnd -ne [IntPtr]::Zero -and [WinSwitch]::IsWindow($savedHwnd)) {
+        [WinSwitch]::StopFlash($savedHwnd)
+    }
     # Signal all siblings to close
     Set-Content $dismissFile "dismiss" -ErrorAction SilentlyContinue
     $window.Close()
@@ -195,6 +220,7 @@ $window.Add_MouseLeftButtonDown({
     Write-PopupLog "DISMISS_SIGNAL written"
 
     if ($savedHwnd -ne [IntPtr]::Zero -and [WinSwitch]::IsWindow($savedHwnd)) {
+        [WinSwitch]::StopFlash($savedHwnd)
         [WinSwitch]::BringToFront($savedHwnd)
         $window.Close()
         if ($savedTabIndex -gt 0 -and $savedTabIndex -le 9) {
